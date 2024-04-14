@@ -6,10 +6,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ray Tracer</title>
+
+    <script src="https://cdn.jsdelivr.net/gh/bobboteck/JoyStick@master/joy.js"></script>
+    <!--<script src="https://cdn.jsdelivr.net/gh/c-kick/mobileConsole/hnl.mobileconsole.min.js"></script> -->
 </head>
 
 <body>
+    <canvas id="canvas">WebGPU or Canvas element aren't supported on your device</canvas>
+    <p id="fpsCount">0 fps</p>
+    <input type="range" id="fov-range" name="fov" min="30" max="120" step="1" value="90">
+    <label for="fov">FOV</label>
+
+    <input type="range" id="compression-range" name="compression" min="1" max="20" step="1" value="10">
+    <label for="compression">COMPRESSION</label>
+
+    <div class="joysticks">
+        <div id="moveJoystick" style="width: 100px; height: 100px; margin-top: 20px; margin-left: 20px;"></div>
+    <div id="rotateJoystick" style="width: 100px; height: 100px; margin-top: 20px; margin-left: 200px;"></div>
+    </div>
+
     <script src="bundle.js"></script>
 </body>
+
+<style>
+    #canvas {
+        aspect-ratio: 16/10;
+        width: 86vw;
+        margin-left: 7vw;
+    }
+
+    .joysticks {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+    }
+</style>
 
 </html>
