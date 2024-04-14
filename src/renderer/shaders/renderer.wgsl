@@ -173,15 +173,16 @@ const objects = array<sphere, 9>(
 
   // light
 
-  sphere(vec3<f32>(0, 7, 0), 1.75, material(vec3<f32>(1), vec3<f32>(5), 0, 0, 0)),
+  //sphere(vec3<f32>(0, 7, 0), 1.75, material(vec3<f32>(1), vec3<f32>(5), 0, 0, 0)),
+  sphere(vec3<f32>(0, 4, 0), 1, material(vec3<f32>(1), vec3<f32>(15), 0, 0, 0)),
 
   // objects
 
   /*sphere(vec3<f32>(-3, -2, 1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 1, 1, 0)),
   sphere(vec3<f32>(2, -2, -1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 0.35, 1, 0)),*/
 
-  sphere(vec3<f32>(-3, -2, 1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
-  sphere(vec3<f32>(2, -2, -1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0))
+  sphere(vec3<f32>(-3, -3, 1), 2.25, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
+  sphere(vec3<f32>(2, -3, -1), 2.25, material(vec3<f32>(1), vec3<f32>(0), 1, 1, 0))
 );
 
 /*const objectNumber = 4;
@@ -297,7 +298,7 @@ fn Eval_BRDF(
     // Returns the weight of the BRDF
     // Lambertian Diffuse only for now
 
-    return 1 / (PI * PI);
+    return 1 / PI;
 }
 
 struct directLightingData {
@@ -373,11 +374,11 @@ fn calculateDirectLighting(
   return output;
 }
 
-const bounces = 2;
-const spp = 2;
+const bounces = 3;
+const spp = 1;
 
 // direct lighting
-/*fn calculateRayColor(
+fn calculateRayColor(
   seed: ptr<function,f32>,
   ray: ray
 ) -> vec3<f32> {
@@ -402,7 +403,7 @@ const spp = 2;
   }
 
   return hit.material.emission;
-}*/
+}
 
 // naive path tracer
 /*fn calculateRayColor(
@@ -458,7 +459,7 @@ const spp = 2;
 }*/
 
 // NEE
-fn calculateRayColor(
+/*fn calculateRayColor(
   seed: ptr<function,f32>,
   directRay: ray
 ) -> vec3<f32> {
@@ -528,7 +529,7 @@ fn calculateRayColor(
   }
 
   return incomingLight;
-}
+}*/
 
 fn isNan(num: f32) -> bool {
     return (bitcast<u32>(num) & 0x7fffffffu) > 0x7f800000u;
