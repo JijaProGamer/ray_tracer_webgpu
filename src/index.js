@@ -14,8 +14,12 @@ canvas.width = 86 / 100 * window.screen.width;
 canvas.height = (9 / 16 * canvas.width) * (compression.value / 10) * window.devicePixelRatio
 canvas.width *= (compression.value / 10) * window.devicePixelRatio;
 
-const Renderer = new renderer({ Canvas: canvas })
+canvas.width = Math.ceil(canvas.width / 8) * 8;
+canvas.height = Math.ceil(canvas.height / 8) * 8;
 
+const Renderer = new renderer({ Canvas: canvas });
+
+let moved = false;
 async function init() {
   await Renderer.Init()
 
@@ -25,6 +29,7 @@ async function init() {
   function setCameraRotation(x, y) {
     Renderer.Camera.Orientation.setFromEulerAngles(x, y)
     Renderer.Camera.Orientation = Renderer.Camera.Orientation
+    moved = true;
   }
 
   canvas.addEventListener('click', () => {
@@ -106,7 +111,8 @@ async function init() {
       movementVector.multiplyScalar(-1 * deltaTime / 1000 * cameraSpeed);
 
       Renderer.Camera.Position.add(movementVector);
-      Renderer.FramesStatic = 0
+      Renderer.Camera.Position = Renderer.Camera.Position
+      moved = true;
     }
   }
 
@@ -127,27 +133,15 @@ async function init() {
       }
 
       setCameraRotation(mouseY, mouseX)
-      Renderer.FramesStatic = 0;
+      moved = true;
     }
   };
 
   setCameraRotation(0, 0)
   document.addEventListener('mousemove', handleMouseMove, false);
 
-  function updateViewData() {
-    const globalViewData = new Float32Array([
-      ...Renderer.Camera.CameraToWorldMatrix.data, // CameraToWorldMatrix
-      Renderer.Camera.Position.x, Renderer.Camera.Position.y, Renderer.Camera.Position.z, // position
-      Renderer.Camera.FieldOfView,
-      canvas.width, canvas.height, // resolution
-      Renderer.Frames, Renderer.FramesStatic
-    ]);
-
-    Renderer.Device.queue.writeBuffer(Renderer.GlobalDataBuffer, 0, globalViewData, 0, globalViewData.length);
-  }
-
   let lastCall = performance.now()
-  function drawFrame() {
+  async function drawFrame() {
     const deltaTime = performance.now() - lastCall
     lastCall = performance.now()
 
@@ -162,7 +156,8 @@ async function init() {
 
     if (movePosition.magnitude() > 0) {
       Renderer.Camera.Position.add(movePosition);
-      framesStatic = 0;
+      Renderer.Camera.Position = Renderer.Camera.Position
+      moved = true;
     }
 
     let rotateJoystickX = rotateJoystick.GetX() / 100;
@@ -181,31 +176,30 @@ async function init() {
 
     if (rotateJoystickX > 0 || rotateJoystickY > 0) {
       setCameraRotation(mouseY, mouseX)
-      Renderer.FramesStatic = 0;
     }
 
     //
 
     updateCamera(deltaTime)
-    updateViewData()
 
-    if (Renderer.FramesStatic < 2048) {
-      let fovValue = FOV.value / 57.2958
+    if (Renderer.FramesStatic < 2048 || moved) {
+      let fovValue = FOV.value / 57.2958;
       if (Renderer.Camera.FieldOfView !== fovValue) {
-        Renderer.FramesStatic = 0
-        Renderer.Camera.FieldOfView = fovValue
+        Renderer.Camera.FieldOfView = fovValue;
       }
 
       if (lastFPSDraw + 1000 <= Date.now()) {
-        lastFPSDraw = Date.now()
-        fpsCounter.textContent = `${FPSNumber} FPS`
+        lastFPSDraw = Date.now();
+        fpsCounter.textContent = `${FPSNumber} FPS`;
         FPSNumber = 0;
       }
 
-      sampleCounter.textContent = `${Renderer.FramesStatic} samples`
+      sampleCounter.textContent = `${Renderer.FramesStatic} samples`;
 
-      Renderer.RenderFrame()
+      await Renderer.MakeFrame();
+      await Renderer.RenderFrame();
       FPSNumber += 1;
+      moved = false;
     }
 
     window.requestAnimationFrame(drawFrame)

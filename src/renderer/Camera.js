@@ -5,13 +5,26 @@ const Quaternion = require("./classes/Quaternion.js")
 class Camera {
     #Position = new Vector3(0, 0, 0);
     #Orientation = new Quaternion(0, 0, 0, 1);
-    FieldOfView = Math.PI / 2;
+    #FieldOfView = Math.PI / 2;
 
     CameraToWorldMatrix = new Matrix(4, 4);
+    CameraMoved = false;
+
+    set FieldOfView(fov){
+        this.#FieldOfView = fov
+
+        this.CameraMoved = true;
+    }
+
+    get FieldOfView(){
+        return this.#FieldOfView
+    }
 
     set Position(pos) {
         this.#Position = pos
         //this.#ComputeCameraToWorldMatrix()
+
+        this.CameraMoved = true;
     }
 
     get Position(){
@@ -21,6 +34,8 @@ class Camera {
     set Orientation(orientation) {
         this.#Orientation = orientation
         this.#ComputeCameraToWorldMatrix()
+
+        this.CameraMoved = true;
     }
 
     get Orientation(){
@@ -80,6 +95,8 @@ class Camera {
 
         this.#Position = translationVector // only this one sets private, so that it doesnt call ComputeCameraToWorldMatrix 
         this.Orientation = quaternion;
+
+        this.CameraMoved = true;
     }
 }
 

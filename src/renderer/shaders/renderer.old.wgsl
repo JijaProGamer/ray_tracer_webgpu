@@ -7,18 +7,16 @@ struct InputGlobalData {
   framesStatic: f32,
 }
 
-struct CameraData {
-  CameraToWorldMatrix: mat4x4<f32>,
-  position: vec3<f32>,
-  fov: f32,
+struct VertexOut {
+  @builtin(position) position : vec4f,
+  @location(0) texcoord: vec2f,
 }
 
 @group(0) @binding(0) var<storage, read> inputData: InputGlobalData;
-@group(0) @binding(1) var<storage, read> cameraData: CameraData;
 
-@group(1) @binding(0) var illuminationTexture: texture_storage_2d<rgba32float, write>;
-@group(1) @binding(1) var normalTexture: texture_storage_2d<rgba8snorm, write>;
-@group(1) @binding(2) var positionTexture: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(0) var historySampler: sampler;
+@group(1) @binding(1) var historyTexture: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(2) var historyReadTexture: texture_2d<f32>;
 
 fn hash(input: u32) -> u32 {
     let state = input * 747796405u + 2891336453u;
@@ -84,6 +82,33 @@ fn randomPoint2(seed: ptr<function,f32>, position: vec2<f32>) -> vec2<f32> {
     return normalize(randomVec2FromVec2(seed, position));
 }
 
+@vertex
+fn vertex_main(@builtin(vertex_index) vertexIndex : u32) -> VertexOut
+{
+  let pos = array(
+    vec2f(-1, 2),
+    vec2f(-1, -1),
+    vec2f(5, -1)
+  );
+
+  var output : VertexOut;
+  let xy = pos[vertexIndex];
+  
+  output.position = vec4f(xy, 0.0, 1.0);
+  output.texcoord = xy;
+  return output;
+}
+
+fn packFloat3AsF32(x: f32, y: f32, z: f32) -> f32 {
+    var xInt: i32 = i32(floor(x * 1023.0));
+    var yInt: i32 = i32(floor(y * 1023.0));
+    var zInt: i32 = i32(floor(z * 1023.0));
+
+    var packed: i32 = ((xInt & 0x3FF) << 20) | ((yInt & 0x3FF) << 10) | (zInt & 0x3FF);
+
+    return f32(packed) / 1023.0;
+}
+
 struct ray {
   origin: vec3<f32>,
   direction: vec3<f32>,
@@ -133,31 +158,75 @@ struct sphere {
   material: material,
 }
 
-const objectNumber = 9;
+/*const objectNumber = 9;
 const objects = array<sphere, 9>(
   // walls 
-  sphere(vec3<f32>(0, 106, 0), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // up
-  sphere(vec3<f32>(0, -106, 0), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // down
-  sphere(vec3<f32>(0, 0, 110), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // front
-  sphere(vec3<f32>(0, 0, -110), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // back
-  sphere(vec3<f32>(106, 0, 0), 100.0, material(vec3<f32>(0, 0.35, 0), vec3<f32>(0), 0, 0, 0)), // left
-  sphere(vec3<f32>(-106, 0, 0), 100.0, material(vec3<f32>(0.35, 0, 0), vec3<f32>(0), 0, 0, 0)), //right
+  sphere(vec3<f32>(0, 56, 0), 50.0, material(vec3<f32>(0.85, 0.85, 0.7), vec3<f32>(0, 0, 0), 0, 0, 0)), // up
+  sphere(vec3<f32>(0, -56, 0), 50.0, material(vec3<f32>(0.85, 0.85, 0.7), vec3<f32>(0, 0, 0), 0, 0, 0)), // down
+  sphere(vec3<f32>(0, 0, 65), 50.0, material(vec3<f32>(0.85, 0.85, 0.7), vec3<f32>(0, 0, 0), 0, 0, 0)), // front
+  sphere(vec3<f32>(0, 0, -65), 50.0, material(vec3<f32>(0.85, 0.85, 0.7), vec3<f32>(0, 0, 0), 0, 0, 0)), // back
+  sphere(vec3<f32>(56, 0, 0), 50.0, material(vec3<f32>(0, 0.5, 0), vec3<f32>(0, 0, 0), 0, 0, 0)), // left
+  sphere(vec3<f32>(-56, 0, 0), 50.0, material(vec3<f32>(0.5, 0, 0), vec3<f32>(0, 0, 0), 0, 0, 0)), //right
 
-  // lights
+  // light
 
-  sphere(vec3<f32>(0, 2, -6), 2, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
+  //sphere(vec3<f32>(0, 7, 0), 1.75, material(vec3<f32>(1), vec3<f32>(5), 0, 0, 0)),
+  sphere(vec3<f32>(0, 4, 0), 1, material(vec3<f32>(1), vec3<f32>(15), 0, 0, 0)),
 
   // objects
 
-  sphere(vec3<f32>(-3, -3, 1), 2, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(1, 0, 0), 0, 0, 0)),
-  sphere(vec3<f32>(2, -3, -1), 2, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 1, 0), 0, 0, 0))
+  /*sphere(vec3<f32>(-3, -2, 1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 1, 1, 0)),
+  sphere(vec3<f32>(2, -2, -1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 0.35, 1, 0)),*/
+
+  sphere(vec3<f32>(-3, -3, 1), 2.25, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
+  sphere(vec3<f32>(2, -3, -1), 2.25, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0))
+);*/
+
+const objectNumber = 9;
+const objects = array<sphere, 9>(
+  // walls 
+  sphere(vec3<f32>(0, 56, 0), 50.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)), // up
+  sphere(vec3<f32>(0, -56, 0), 50.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)), // down
+  sphere(vec3<f32>(0, 0, 65), 50.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)), // front
+  sphere(vec3<f32>(0, 0, -65), 50.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)), // back
+  sphere(vec3<f32>(56, 0, 0), 50.0, material(vec3<f32>(0, 0.35, 0), vec3<f32>(0, 0, 0), 0, 0, 0)), // left
+  sphere(vec3<f32>(-56, 0, 0), 50.0, material(vec3<f32>(0.35, 0, 0), vec3<f32>(0, 0, 0), 0, 0, 0)), //right
+
+  // light
+
+  sphere(vec3<f32>(0, -2, -6), 2.5, material(vec3<f32>(1), vec3<f32>(3), 0, 0, 0)),
+
+  // objects
+
+  /*sphere(vec3<f32>(-3, -2, 1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 1, 1, 0)),
+  sphere(vec3<f32>(2, -2, -1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 0.35, 1, 0)),*/
+
+  sphere(vec3<f32>(-3, -3, 1), 2.25, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
+  sphere(vec3<f32>(2, -3, -1), 2.25, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0))
 );
 
+/*const objectNumber = 4;
+const objects = array<sphere, objectNumber>(
+  // light
+
+  sphere(vec3<f32>(0, -4, -5), 3, material(vec3<f32>(1), vec3<f32>(10, 10, 0), 0, 0, 0)),
+
+  // objects
+
+  /*sphere(vec3<f32>(-3, -2, 1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 1, 0, 0)),
+  sphere(vec3<f32>(2, -2, -1), 1.5, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
+  sphere(vec3<f32>(2, -8, -1), 3, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),*/
+
+  sphere(vec3<f32>(0, -4, -10), 2, material(vec3<f32>(1), vec3<f32>(0), 1, 0, 0)),
+  sphere(vec3<f32>(0, -4, -20), 4, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
+  sphere(vec3<f32>(0, -4, -35), 6, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
+);*/
+
 const enviromentalLight = 0.0;
-const lightNumber = 2;
+const lightNumber = 1;
 const lights = array<f32, lightNumber>(
-  //6
-  7, 8
+  //0
+  6
 );
 
 fn getHit(ray: ray) -> hitResult {
@@ -330,28 +399,16 @@ fn calculateDirectLighting(
 const bounces = 3;
 const spp = 1;
 
-struct rayColor {
-  color: vec3<f32>,
-  intersection: vec3<f32>,
-  normal: vec3<f32>
-}
-
+// direct lighting
 /*fn calculateRayColor(
   seed: ptr<function,f32>,
   ray: ray
-) -> rayColor {
-  var output: rayColor;
+) -> vec3<f32> {
   let hit = getHit(ray);
 
   if(!hit.hit){
-    output.normal = ray.direction;
-    output.color = getSkyColor(ray.direction);
-    output.intersection = ray.direction * 1000 + ray.origin;
-    return output;  
+    return getSkyColor(ray.direction);
   }
-
-  output.normal = hit.normal;
-  output.intersection = hit.position;
 
   let lightData = calculateDirectLighting(seed, hit.position);
 
@@ -363,26 +420,74 @@ struct rayColor {
     let G = abs(dot(hit.normal, lightData.direction) * dot(lightData.intersection.normal, lightData.direction)) / lightData.diminuation;
     let b = Eval_BRDF(diffuseDirection, lightData.direction);
 
-    output.color = ((lightNumber + 1) * lightData.lightArea * b * G * Le(lightMaterial, lightData.intersection).rgb) * material.color;
-    return output;
+    return ((lightNumber + 1) * lightData.lightArea * b * G * Le(lightMaterial, lightData.intersection).rgb) * material.color;
+    //return material.color * lightMaterial.emission / lightData.diminuation;
   }
 
-  output.color = hit.material.emission;
-  return output;
+  return hit.material.emission;
 }*/
 
+// naive path tracer
+/*fn calculateRayColor(
+  seed: ptr<function,f32>,
+  directRay: ray
+) -> vec3<f32> {
+  let firstHit = getHit(directRay);
+  if(!firstHit.hit){
+    return getSkyColor(directRay.direction);
+  }
+
+  let firstMaterial = firstHit.material;
+
+  let diffuseDirection = normalize(firstHit.normal + RandomSphereDirection(seed, firstHit.position));
+  let specularDirection = reflect(directRay.direction, firstHit.normal);
+  let isSpecular = f32(firstMaterial.specularity > randomFromVec3(seed, firstHit.position));
+  let isTransparent = f32(firstMaterial.specularity > randomFromVec3(seed, firstHit.position));
+
+  let rayDirection = mix(diffuseDirection, specularDirection, firstMaterial.smoothness * isSpecular);
+
+  var nextRay: ray;
+  nextRay.direction = rayDirection;
+  nextRay.origin = firstHit.position + nextRay.direction * 0.00001;
+
+  var incomingLight = firstMaterial.emission;
+  var throughput = firstMaterial.color;
+
+  for(var i: i32 = 0; i < bounces; i++){
+    let hit = getHit(nextRay);
+    if(!hit.hit){
+      incomingLight += getSkyColor(nextRay.direction) * throughput;
+      break;
+    }
+
+    let material = hit.material;
+
+    let diffuseDirection = normalize(hit.normal + RandomSphereDirection(seed, hit.position));
+    let specularDirection = reflect(nextRay.direction, hit.normal);
+    let isSpecular = f32(material.specularity > randomFromVec3(seed, hit.position));
+    let isTransparent = f32(material.specularity > randomFromVec3(seed, hit.position));
+
+    let rayDirection = mix(diffuseDirection, specularDirection, material.smoothness * isSpecular);
+
+    nextRay.direction = rayDirection;
+    nextRay.origin = hit.position + nextRay.direction * 0.00001;
+
+    let emittedLight = material.emission;
+    incomingLight += emittedLight * throughput;
+    throughput *= material.color;
+  }
+
+  return incomingLight;
+}*/
+
+// NEE
 fn calculateRayColor(
   seed: ptr<function,f32>,
   directRay: ray
-) -> rayColor {
-  var output: rayColor;
-
+) -> vec3<f32> {
   let firstHit = getHit(directRay);
   if(!firstHit.hit){
-    output.normal = directRay.direction;
-    output.color = getSkyColor(directRay.direction);
-    output.intersection = directRay.direction * 1000 + directRay.origin;
-    return output;
+    return getSkyColor(directRay.direction);
   }
 
   let firstMaterial = firstHit.material;
@@ -403,19 +508,11 @@ fn calculateRayColor(
   var incomingLight = firstMaterial.emission;
   var throughput = firstMaterial.color;
 
-  output.normal = firstHit.normal;
-  output.intersection = firstHit.position;
-
   for(var i: i32 = 0; i < bounces; i++){
     let hit = getHit(nextRay);
     if(!hit.hit){
       incomingLight += getSkyColor(nextRay.direction) * throughput;
       break;
-    }
-
-    if(i == 0 && isSpecular == 1.0){
-      output.normal = hit.normal;
-      output.intersection = hit.position;
     }
 
     let lightData = calculateDirectLighting(seed, hit.position);
@@ -435,7 +532,7 @@ fn calculateRayColor(
     let diffuseDirection = normalize(hit.normal + RandomSphereDirection(seed, hit.position));
     let specularDirection = reflect(nextRay.direction, hit.normal);
     let isSpecular = f32(material.specularity > randomFromVec3(seed, hit.position));
-    //let isTransparent = f32(material.specularity > randomFromVec3(seed, hit.position));
+    let isTransparent = f32(material.specularity > randomFromVec3(seed, hit.position));
 
     let rayDirection = mix(diffuseDirection, specularDirection, material.smoothness * isSpecular);
 
@@ -453,68 +550,75 @@ fn calculateRayColor(
     lastDirection = nextRay.direction;
   }
 
-  output.color = incomingLight;
-  return output;
+  return incomingLight;
 }
 
 fn isNan(num: f32) -> bool {
     return (bitcast<u32>(num) & 0x7fffffffu) > 0x7f800000u;
 }
 
-@compute @workgroup_size(8, 8)
-fn main(
-    @builtin(global_invocation_id) texID: vec3<u32>
-){
-    let texCoord = vec2<f32>(texID.xy);
-    var seed = inputData.totalFrames;
-    //random(&seed);
+fn ACESFilm(x: vec3<f32>) -> vec3<f32> {
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
 
-    let depth = tan(cameraData.fov / 2.0);
-    
-    var pixelColor: vec3<f32>;
-    var pixelNormal: vec3<f32>;
-    var pixelPosition: vec3<f32>;
+  return saturate((x * (a * x +b )) / (x * (c * x +d ) + e));
+}
 
-    var raysDone = 0;
+@fragment
+fn fragment_main(fragData: VertexOut) -> @location(0) vec4f
+{
+  var seed = inputData.totalFrames;
+  //random(&seed);
 
-    for(var i = 0; i < spp; i++){
-        let fakePixelPosition = texCoord + randomVec2FromVec2(&seed, texCoord);
-        var NDC = (fakePixelPosition + vec2<f32>(0.5)) / inputData.resolution;
+  let depth = tan(inputData.fov / 2.0);
 
-        let aspectRatio = inputData.resolution.x / inputData.resolution.y;
+  var texCoord = fragData.texcoord;
+  texCoord *= inputData.resolution;
+  texCoord += inputData.resolution;
+  texCoord /= 2;
+  
+  var lastColor = textureSample(historyReadTexture, historySampler, texCoord / inputData.resolution);
+  var newColor: vec3<f32>;
+  var raysDone = 0;
 
-        let screenX = 2 * NDC.x - 1;
-        let screenY = 1 - 2 * NDC.y;
+  for(var i = 0; i < spp; i++){
+    let fakePixelPosition = texCoord + randomVec2FromVec2(&seed, texCoord);
+    var NDC = (fakePixelPosition + vec2<f32>(0.5)) / inputData.resolution;
 
-        let cameraX = screenX * depth * aspectRatio;
-        let cameraY = screenY * depth;
+    let aspectRatio = inputData.resolution.x / inputData.resolution.y;
 
-        let rayDirection = (cameraData.CameraToWorldMatrix * vec4<f32>(cameraX, -cameraY, -1, 0)).xyz;
+    let screenX = 2 * NDC.x - 1;
+    let screenY = 1 - 2 * NDC.y;
 
-        let ray = ray(cameraData.position, rayDirection);
-        let rayColor = calculateRayColor(&seed, ray);
-        if(isNan(rayColor.color.r) || isNan(rayColor.color.g) || isNan(rayColor.color.b)){
-            continue;
-        }
+    let cameraX = screenX * depth * aspectRatio;
+    let cameraY = screenY * depth;
 
-        pixelColor += rayColor.color;
-        pixelNormal += rayColor.normal;
-        pixelPosition += (cameraData.position - rayColor.intersection);
-        raysDone += 1;
+    let rayDirection = (inputData.CameraToWorldMatrix * vec4<f32>(cameraX, -cameraY, -1, 0)).xyz;
+
+    let ray = ray(inputData.position, rayDirection);
+    let rayColor = calculateRayColor(&seed, ray);
+    if(isNan(rayColor.r) || isNan(rayColor.g) || isNan(rayColor.b)){
+      continue;
     }
 
-    pixelColor /= f32(max(raysDone, 1));
-    pixelNormal /= f32(max(raysDone, 1));
-    pixelPosition /= f32(max(raysDone, 1));
+    newColor += rayColor;
+    raysDone += 1;
+  }
 
-    //textureStore(illuminationTexture, texID.xy, vec4<f32>(texCoord.xy / inputData.resolution, 0, 1));
-    textureStore(illuminationTexture, texID.xy, vec4<f32>(pixelColor, 1));
-    textureStore(normalTexture, texID.xy, vec4<f32>(pixelNormal, 1));
-    textureStore(positionTexture, texID.xy, vec4<f32>(pixelPosition, 1));
+  newColor /= f32(raysDone);
 
-    //return vec4<f32>(random(&seed), random(&seed), random(&seed), 1);
-    //return averageColor;
-    //return vec4<f32>(pow(averageColor.xyz, vec3<f32>(1/2.2)), 1);
-    //return vec4<f32>(pow(ACESFilm(averageColor.xyz), vec3<f32>(1/2.2)), 1);
-    //return vec4<f32>(texCoord / inputData.resolution, 0, 1);
+  let blendWeight = 1.0 / (inputData.framesStatic + 1);
+  let averageColor = mix(lastColor, vec4<f32>(newColor, 1), blendWeight);
+
+  textureStore(historyTexture, vec2<i32>(texCoord), averageColor);
+
+  //return vec4<f32>(random(&seed), random(&seed), random(&seed), 1);
+
+  //return averageColor;
+  return vec4<f32>(pow(averageColor.xyz, vec3<f32>(1/2.2)), 1);
+  //return vec4<f32>(pow(ACESFilm(averageColor.xyz), vec3<f32>(1/2.2)), 1);
+  //return vec4<f32>(texCoord / inputData.resolution, 0, 1);
 }
