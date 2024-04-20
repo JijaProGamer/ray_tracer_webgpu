@@ -10,27 +10,54 @@ const sampleCounter = document.querySelector("#sampleCount")
 const compression = document.querySelector("#compression-range")
 const FOV = document.querySelector("#fov-range")
 
-canvas.width = 86 / 100 * window.screen.width;
-canvas.height = (9 / 16 * canvas.width) * (compression.value / 10) * window.devicePixelRatio
-canvas.width *= (compression.value / 10) * window.devicePixelRatio;
-
-canvas.width = Math.ceil(canvas.width / 8) * 8;
-canvas.height = Math.ceil(canvas.height / 8) * 8;
-
 const Renderer = new renderer({ Canvas: canvas });
 
+let lastCompression = compression.value
+let isFullScreen = false;
+
+function setCanvasSize(){
+  let width 
+  let height
+
+  if(isFullScreen){
+    width = canvas.width = window.screen.width;
+    height = canvas.height = window.screen.height;
+    isFullScreen = false;
+
+  } else {
+    width = canvas.width = 86 / 100 * window.screen.width;
+    height = canvas.height = (9 / 16 * canvas.width)
+  }
+
+  canvas.height *= (compression.value / 10) * window.devicePixelRatio
+  canvas.width *= (compression.value / 10) * window.devicePixelRatio;
+
+  canvas.width = Math.ceil(canvas.width / 8) * 8;
+  canvas.height = Math.ceil(canvas.height / 8) * 8;
+
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
+  Renderer.MakeBuffers()
+  Renderer.Camera.Position = Renderer.Camera.Position
+}
+
+document.addEventListener("fullscreenchange", setCanvasSize)
+
+function setCameraRotation(x, y) {
+  Renderer.Camera.Orientation.setFromEulerAngles(x, y)
+  Renderer.Camera.Orientation = Renderer.Camera.Orientation
+  moved = true;
+}
+
 let moved = false;
+
 async function init() {
   await Renderer.Init()
+  setCanvasSize()
 
   let lastFPSDraw = Date.now()
   let FPSNumber = 0
-
-  function setCameraRotation(x, y) {
-    Renderer.Camera.Orientation.setFromEulerAngles(x, y)
-    Renderer.Camera.Orientation = Renderer.Camera.Orientation
-    moved = true;
-  }
 
   canvas.addEventListener('click', () => {
     canvas.requestPointerLock();
@@ -69,6 +96,16 @@ async function init() {
         break;
       case 'e':
         movement.down = true;
+        break;
+
+      case "o":
+        if(!isFullScreen){
+          canvas.requestFullscreen()
+          isFullScreen = true;
+        } else {
+          setCanvasSize()
+        }
+
         break;
     }
   }
@@ -142,6 +179,11 @@ async function init() {
 
   let lastCall = performance.now()
   async function drawFrame() {
+    if(lastCompression != compression.value){
+        setCanvasSize(false)
+        lastCompression = compression.value
+    }
+
     const deltaTime = performance.now() - lastCall
     lastCall = performance.now()
 
@@ -208,4 +250,6 @@ async function init() {
   window.requestAnimationFrame(drawFrame)
 }
 
-init()
+init().catch((err) => {
+  console.log(err.toString(), err.stack)
+})

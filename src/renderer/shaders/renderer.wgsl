@@ -18,6 +18,29 @@ struct VertexOut {
 
 @group(2) @binding(0) var illuminationTexture: texture_2d<f32>;
 
+/*fn hash(input: u32) -> u32 {
+    let state = input * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+fn floatConstruct(m: u32) -> f32 {
+    /*let ieeeMantissa: u32 = 0x007FFFFFu;
+    let ieeeOne: u32 = 0x3F800000u; 
+
+    var mBits: u32 = m & ieeeMantissa;
+    mBits = mBits | ieeeOne;
+
+    return bitcast<f32>(mBits) - 1;*/
+
+    return fract(f32(m) / 4294967295);
+}
+
+fn random(seed: ptr<function,f32>) -> f32 {
+    *seed = floatConstruct(hash(bitcast<u32>(*seed)));
+    return fract(*seed);
+}*/
+
 fn isNan(num: f32) -> bool {
     return (bitcast<u32>(num) & 0x7fffffffu) > 0x7f800000u;
 }
@@ -29,7 +52,7 @@ fn ACESFilm(x: vec3<f32>) -> vec3<f32> {
   let d = 0.59;
   let e = 0.14;
 
-  return saturate((x * (a * x +b )) / (x * (c * x +d ) + e));
+  return saturate((x * (a * x + b )) / (x * (c * x +d ) + e));
 }
 
 @vertex
@@ -66,8 +89,20 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4f
 
   textureStore(historyTexture, vec2<i32>(texCoord), averageColor);
 
+  /*var ditherAmount: f32;
+
+  for(var x = texCoord.x - 1; x < texCoord.x + 1; x += 1){
+    for(var y = texCoord.y - 2; y < texCoord.y + 2; y += 1){
+        var dither = x + y * inputData.resolution.x;
+        ditherAmount += random(&dither);
+    }
+  }*/
+
+  var outputColor = pow(ACESFilm(averageColor.xyz), vec3<f32>(1/2.2));
+  //outputColor += vec3<f32>(ditherAmount / 500);
+
   //return averageColor;
   //return vec4<f32>(pow(averageColor.xyz, vec3<f32>(1/2.2)), 1.0);
-  return vec4<f32>(pow(ACESFilm(averageColor.xyz), vec3<f32>(1/2.2)), 1);
+  return vec4<f32>(outputColor, 1);
   //return vec4<f32>(texCoord / inputData.resolution, 0, 1);
 }

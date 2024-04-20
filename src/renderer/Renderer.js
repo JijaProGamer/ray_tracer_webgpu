@@ -1,5 +1,7 @@
 const Camera = require("./Camera.js")
 
+const processorList = require("./post_processing/processorList.js")
+
 class Renderer {
     Camera = new Camera()
 
@@ -7,7 +9,10 @@ class Renderer {
     FramesStatic = 0
 
     //Denoiser = {type: "none"}
-    Denoiser = { type: "ATrous", levels: [3, 5, 7], c_phi: 0.1, n_phi: 0.5, p_phi: 0.1 }
+    Denoiser = { type: "ATrous", levels: [3, 5, 7], c_phi: 0.1, n_phi: 0.025, p_phi: 0.95 }
+    PostProcessingStack = [
+        new processorList.BloomProcessor()
+    ]
 
     constructor({ Canvas }) {
         this.Canvas = Canvas;
@@ -25,9 +30,16 @@ class Renderer {
             throw new Error("Couldn't request WebGPU adapter.");
         }
 
+        let requiredFeatures = ["float32-filterable"]
+        for(let feature of requiredFeatures){
+            if(!this.adapter.features.has(feature)){
+                throw new Error(`Couldn't request ${feature}`);
+            }
+        }
+
         this.Device = await this.adapter.requestDevice({
             //requiredFeatures: ["chromium-experimental-read-write-storage-texture"],
-            requiredFeatures: ["float32-filterable"]
+            requiredFeatures,
         });
 
         this.context = await this.Canvas.getContext("webgpu")
@@ -43,6 +55,12 @@ class Renderer {
 
         await this.MakeLayouts();
         this.MakeBuffers();
+
+        // post processing stack
+
+        for(let PostProcessingStackElement of this.PostProcessingStack ){
+            await PostProcessingStackElement.Init(this)
+        }
     }
 
     async MakeLayouts() {
@@ -414,6 +432,10 @@ class Renderer {
                 { binding: 3, resource: this.positionTextureRead.createView() },
             ],
         });
+
+        for(let PostProcessingStackElement of this.PostProcessingStack ){
+            PostProcessingStackElement.MakeBuffers()
+        }
     }
 
     #UpdateGlobalData() {
@@ -568,6 +590,11 @@ class Renderer {
         this.#UpdateGlobalData()
         await this.DenoiseFrame()
 
+        for(let PostProcessingStackElement of this.PostProcessingStack){
+            await PostProcessingStackElement.ProcessFrame();
+        }
+
+
         const commandEncoder = this.Device.createCommandEncoder();
 
         const passEncoder = commandEncoder.beginComputePass();
@@ -609,12 +636,10 @@ class Renderer {
 
         const commandEncoder = this.Device.createCommandEncoder();
 
-        const clearColor = { r: 1, g: 0, b: 1, a: 1 };
-
         const renderPassDescriptor = {
             colorAttachments: [
                 {
-                    clearValue: clearColor,
+                    clearValue: { r: 1, g: 0, b: 1, a: 1 },
                     loadOp: "clear",
                     storeOp: "store",
                     view: this.context.getCurrentTexture().createView(),
@@ -633,6 +658,7 @@ class Renderer {
         passEncoder.end();
 
         this.Device.queue.submit([commandEncoder.finish()]);
+        await this.Device.queue.onSubmittedWorkDone();
 
         this.Frames += 1;
         this.FramesStatic += 1;

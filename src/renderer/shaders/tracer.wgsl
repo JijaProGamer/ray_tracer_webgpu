@@ -134,30 +134,32 @@ struct sphere {
 }
 
 const objectNumber = 9;
-const objects = array<sphere, 9>(
+const objects = array<sphere, objectNumber>(
   // walls 
   sphere(vec3<f32>(0, 106, 0), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // up
   sphere(vec3<f32>(0, -106, 0), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // down
   sphere(vec3<f32>(0, 0, 110), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // front
   sphere(vec3<f32>(0, 0, -110), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // back
-  sphere(vec3<f32>(106, 0, 0), 100.0, material(vec3<f32>(0, 0.35, 0), vec3<f32>(0), 0, 0, 0)), // left
-  sphere(vec3<f32>(-106, 0, 0), 100.0, material(vec3<f32>(0.35, 0, 0), vec3<f32>(0), 0, 0, 0)), //right
+  sphere(vec3<f32>(106, 0, 0), 100.0, material(vec3<f32>(0.05, 0.5, 0.05), vec3<f32>(0), 0, 0, 0)), // left
+  sphere(vec3<f32>(-106, 0, 0), 100.0, material(vec3<f32>(0.5, 0.05, 0.05), vec3<f32>(0), 0, 0, 0)), //right
 
   // lights
 
-  sphere(vec3<f32>(0, 2, -6), 2, material(vec3<f32>(1), vec3<f32>(0), 0, 0, 0)),
+  sphere(vec3<f32>(0, 2, -6), 2, material(vec3<f32>(1), vec3<f32>(2), 0, 0, 0)),
 
   // objects
 
-  sphere(vec3<f32>(-3, -3, 1), 2, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(1, 0, 0), 0, 0, 0)),
-  sphere(vec3<f32>(2, -3, -1), 2, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 1, 0), 0, 0, 0))
+  sphere(vec3<f32>(-3, -3.5, 1.5), 3, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
+  sphere(vec3<f32>(3, -3.5, -1.5), 3, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
+
+  //sphere(vec3<f32>(-4, 0, 1), 1.25, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
+  //sphere(vec3<f32>(1, 0, -1), 1.25, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
 );
 
 const enviromentalLight = 0.0;
-const lightNumber = 2;
+const lightNumber = 1;
 const lights = array<f32, lightNumber>(
-  //6
-  7, 8
+  6
 );
 
 fn getHit(ray: ray) -> hitResult {
@@ -246,12 +248,12 @@ fn Le(
 fn Eval_BRDF(
     incoming: vec3<f32>,
     outgoing: vec3<f32>,
-    
+    wasSpecular: f32,
 ) -> f32 {
     // Returns the weight of the BRDF
     // Lambertian Diffuse only for now
 
-    return 1 / PI;
+    return mix(1 / PI, f32(abs(dot(incoming, outgoing)) <= 0.01 ), wasSpecular);
 }
 
 struct directLightingData {
@@ -390,7 +392,7 @@ fn calculateRayColor(
   let diffuseDirection = normalize(firstHit.normal + RandomSphereDirection(seed, firstHit.position));
   let specularDirection = reflect(directRay.direction, firstHit.normal);
   let isSpecular = f32(firstMaterial.specularity > randomFromVec3(seed, firstHit.position));
-  let isTransparent = f32(firstMaterial.specularity > randomFromVec3(seed, firstHit.position));
+  //let isTransparent = f32(firstMaterial.specularity > randomFromVec3(seed, firstHit.position));
 
   let rayDirection = mix(diffuseDirection, specularDirection, firstMaterial.smoothness * isSpecular);
 
@@ -399,6 +401,7 @@ fn calculateRayColor(
   nextRay.origin = firstHit.position + nextRay.direction * 0.0001;
 
   var lastDirection = rayDirection;
+  var lastSpecularity = isSpecular;
 
   var incomingLight = firstMaterial.emission;
   var throughput = firstMaterial.color;
@@ -425,7 +428,7 @@ fn calculateRayColor(
       let material = hit.material;
 
       let G = abs(dot(hit.normal, lightData.direction) * dot(lightData.intersection.normal, lightData.direction)) / lightData.diminuation;
-      let b = Eval_BRDF(nextRay.direction, lightData.direction);
+      let b = Eval_BRDF(nextRay.direction, lightData.direction, lastSpecularity);
 
       incomingLight += (lightNumber * lightData.lightArea * b * G * Le(lightMaterial, lightData.intersection).rgb) * throughput;
     }
@@ -447,10 +450,11 @@ fn calculateRayColor(
     let p = (cosTheta * sinTheta) / PI;
 
     throughput *= getTriangleAlbedo(material, hit).rgb *
-              Eval_BRDF(lastDirection, nextRay.direction) 
+              Eval_BRDF(lastDirection, nextRay.direction, 0.0) 
               * cosTheta * sinTheta / p;
 
     lastDirection = nextRay.direction;
+    lastSpecularity = isSpecular;
   }
 
   output.color = incomingLight;

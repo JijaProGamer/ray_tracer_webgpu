@@ -21,22 +21,6 @@ struct DenoisingData {
 @group(1) @binding(2) var normalTexture: texture_2d<f32>;
 @group(1) @binding(3) var positionTexture: texture_2d<f32>;
 
-const offset = array<vec2<i32>, 25>(
-    vec2<i32>(-2, -2), vec2<i32>(-1, -2), vec2<i32>(0, -2), vec2<i32>(1, -2), vec2<i32>(2, -2),
-    vec2<i32>(-2, -1), vec2<i32>(-1, -1), vec2<i32>(0, -1), vec2<i32>(1, -1), vec2<i32>(2, -1),
-    vec2<i32>(-2, 0), vec2<i32>(-1, 0), vec2<i32>(0, 0), vec2<i32>(1, 0), vec2<i32>(2, 0),
-    vec2<i32>(-2, 1), vec2<i32>(-1, 1), vec2<i32>(0, 1), vec2<i32>(1, 1), vec2<i32>(2, 1),
-    vec2<i32>(-2, 2), vec2<i32>(-1, 2), vec2<i32>(0, 2), vec2<i32>(1, 2), vec2<i32>(2, 2)
-);
-
-const kernel = array<f32, 25>(
-    1.0 / 256.0,   1.0 / 64.0,   3.0 / 128.0,   1.0 / 64.0,   1.0 / 256.0,
-    1.0 / 64.0 ,   1.0 / 16.0,   3.0 / 32.0,    1.0 / 16.0,   1.0 / 64.0,
-    3.0 / 128.0,   3.0 / 32.0,   9.0 / 64.0,    3.0 / 32.0,   3.0 / 128.0,
-    1.0 / 64.0 ,   1.0 / 16.0,   3.0 / 32.0,    1.0 / 16.0,   1.0 / 64.0,
-    1.0 / 256.0,   1.0 / 64.0,   3.0 / 128.0,   1.0 / 64.0,   1.0 / 256.0
-);
-
 @compute @workgroup_size(8, 8)
 fn main(
     @builtin(global_invocation_id) texID: vec3<u32>
@@ -94,10 +78,13 @@ fn main(
             let n_w = min(exp(-(dist2)/denoisingData.n_phi), 1.0);
             let p_w = min(exp(-(dist3)/denoisingData.p_phi),1.0);
 
+            let position = vec2<f32>(f32(x), f32(y));
+            //let kernel = sqrt(distance(position, vec2<f32>(0)));
+
             //let weight = n_w * p_w * c_w;
             let weight = n_w * p_w;
-            sum += ctmp * weight;
-            cum_w += weight;
+            cum_w += weight;// * kernel;
+            sum += weight * ctmp;// * kernel;
         }
     }
 
