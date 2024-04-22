@@ -13,12 +13,41 @@ struct CameraData {
   fov: f32,
 }
 
+struct InputLightData {
+  objectNumber: f32,
+  sampleSky: f32,
+  padding1: f32,
+  padding2: f32,
+  objects: array<f32>,
+}
+
+struct InputMapData {
+  objectNumber: f32,
+  padding0: f32,
+  padding1: f32,
+  padding2: f32,
+  objects: array<triangle>,
+}
+
+struct InputMaterialsData {
+  objectNumber: f32,
+  padding0: f32,
+  padding1: f32,
+  padding2: f32,
+  objects: array<material>,
+}
+
 @group(0) @binding(0) var<storage, read> inputData: InputGlobalData;
 @group(0) @binding(1) var<storage, read> cameraData: CameraData;
 
-@group(1) @binding(0) var illuminationTexture: texture_storage_2d<rgba32float, write>;
-@group(1) @binding(1) var normalTexture: texture_storage_2d<rgba8snorm, write>;
-@group(1) @binding(2) var positionTexture: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(0) var<storage, read> inputMap: InputMapData;
+@group(1) @binding(1) var<storage, read> inputLights: InputLightData;
+@group(1) @binding(2) var<storage, read> inputMaterials: InputMaterialsData;
+@group(1) @binding(3) var inputMaterialTexture: texture_2d_array<f32>;
+
+@group(2) @binding(0) var illuminationTexture: texture_storage_2d<rgba32float, write>;
+@group(2) @binding(1) var normalTexture: texture_storage_2d<rgba8snorm, write>;
+@group(2) @binding(2) var positionTexture: texture_storage_2d<rgba16float, write>;
 
 fn hash(input: u32) -> u32 {
     let state = input * 747796405u + 2891336453u;
@@ -89,103 +118,117 @@ struct ray {
   direction: vec3<f32>,
 }
 
-fn hit_sphere(sphere: sphere, r: ray) -> f32
+struct RayTriangleIntersectionResult {
+    intersection: bool,
+    t: f32,
+    u: f32,
+    v: f32,
+};
+
+fn ray_intersects_triangle(triangle: triangle, ray: ray) -> RayTriangleIntersectionResult 
 {
-    let oc = r.origin - sphere.position;
+    let epsilon: f32 = 0.0001;
 
-    let a = dot(r.direction, r.direction);
-    let half_b = dot(oc, r.direction);
-    let c = dot(oc, oc) - sphere.radius*sphere.radius;
-    let discriminant = half_b*half_b - a*c;
+    let edge1: vec3<f32> = triangle.b - triangle.a;
+    let edge2: vec3<f32> = triangle.c - triangle.a;
+    let ray_cross_e2: vec3<f32> = cross(ray.direction, edge2);
+    let det: f32 = dot(edge1, ray_cross_e2);
 
-    if (discriminant < 0) {
-        return -1.0;
+    if (det > -epsilon && det < epsilon) { // parallel
+        return RayTriangleIntersectionResult(false, 0.0, 0.0, 0.0);
+    }
+
+    let inv_det: f32 = 1.0 / det;
+    let s: vec3<f32> = ray.origin - triangle.a;
+    let u: f32 = inv_det * dot(s, ray_cross_e2);
+
+    if (u < 0.0 || u > 1.0) { // not hitting triangle (only hitting plane)
+        return RayTriangleIntersectionResult(false, 0.0, 0.0, 0.0);
+    }
+
+    let s_cross_e1: vec3<f32> = cross(s, edge1);
+    let v: f32 = inv_det * dot(ray.direction, s_cross_e1);
+
+    if (v < 0.0 || u + v > 1.0) { // not hitting triangle (only hitting plane)
+        return RayTriangleIntersectionResult(false, 0.0, 0.0, 0.0);
+    }
+
+    let t: f32 = inv_det * dot(edge2, s_cross_e1); // distance from origin to hit position
+
+    if (t > epsilon) {
+        return RayTriangleIntersectionResult(true, t, u, v);
     } else {
-        var root = (-half_b - sqrt(discriminant) ) / a;
-        if root < 0.0 {
-            root = (-half_b + sqrt(discriminant) ) / a;
-        }
-
-        return root;    
+        return RayTriangleIntersectionResult(false, 0.0, 0.0, 0.0);
     }
 }
 
+
 struct material {
   color: vec3<f32>,
+  smoothness: f32,
   //specularColor: vec3<f32>,
   emission: vec3<f32>,
-  smoothness: f32,
   specularity: f32,
+
   transparency: f32,
 }
 
 struct hitResult {
   hit: bool,
   objectHit: i32,
+
+  hitData: RayTriangleIntersectionResult,
   position: vec3<f32>,
   normal: vec3<f32>,
+  uv: vec2<f32>,
+
   material: material,
 }
 
-struct sphere {
-  position: vec3<f32>,
-  radius: f32,
-  material: material,
+struct triangle {
+  a: vec3<f32>,
+  material: f32,
+  b: vec3<f32>,
+  c: vec3<f32>,
+
+  na: vec3<f32>,
+  nb: vec3<f32>,
+  nc: vec3<f32>,
+
+  uva: vec2<f32>,
+  uvb: vec2<f32>,
 }
-
-const objectNumber = 9;
-const objects = array<sphere, objectNumber>(
-  // walls 
-  sphere(vec3<f32>(0, 106, 0), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // up
-  sphere(vec3<f32>(0, -106, 0), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // down
-  sphere(vec3<f32>(0, 0, 110), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // front
-  sphere(vec3<f32>(0, 0, -110), 100.0, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0), 0, 0, 0)), // back
-  sphere(vec3<f32>(106, 0, 0), 100.0, material(vec3<f32>(0.05, 0.5, 0.05), vec3<f32>(0), 0, 0, 0)), // left
-  sphere(vec3<f32>(-106, 0, 0), 100.0, material(vec3<f32>(0.5, 0.05, 0.05), vec3<f32>(0), 0, 0, 0)), //right
-
-  // lights
-
-  sphere(vec3<f32>(0, 2, -6), 2, material(vec3<f32>(1), vec3<f32>(2), 0, 0, 0)),
-
-  // objects
-
-  sphere(vec3<f32>(-3, -3.5, 1.5), 3, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
-  sphere(vec3<f32>(3, -3.5, -1.5), 3, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
-
-  //sphere(vec3<f32>(-4, 0, 1), 1.25, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
-  //sphere(vec3<f32>(1, 0, -1), 1.25, material(vec3<f32>(0.76, 0.69, 0.56), vec3<f32>(0, 0, 0), 0, 0, 0)),
-);
-
-const enviromentalLight = 0.0;
-const lightNumber = 1;
-const lights = array<f32, lightNumber>(
-  6
-);
 
 fn getHit(ray: ray) -> hitResult {
   var output: hitResult;
 
-  var bestObj: sphere;
+  var bestObj: triangle;
+  var bestData: RayTriangleIntersectionResult;
   var bestDist = 999.0;
   var found = false;
 
+  let objectNumber = i32(inputMap.objectNumber);
   for(var i: i32 = 0; i < objectNumber; i++){
-    let obj = objects[i];
-    let dist = hit_sphere(obj, ray);
+    let obj = inputMap.objects[i];
+    let intersection_data = ray_intersects_triangle(obj, ray);
 
-    if(dist < bestDist && dist >= 0){
+    if(intersection_data.intersection && intersection_data.t < bestDist){
       output.objectHit = i;
-      bestDist = dist;
+      bestDist = intersection_data.t;
       bestObj = obj;
+      bestData = intersection_data;
       found = true;
     }
   }
 
   if(found){
+    let w = 1.0 - bestData.u - bestData.v;
+    
     output.hit = true;
     output.position = ray.origin + ray.direction * bestDist;
-    output.normal = (output.position - bestObj.position) / bestObj.radius;
-    output.material = bestObj.material;
+    output.uv = bestData.u * bestObj.uva + bestData.v * bestObj.uvb;
+    output.normal = normalize(bestData.u * bestObj.na + bestData.v * bestObj.nb + w * bestObj.nc);
+    output.material = inputMaterials.objects[i32(bestObj.material)];
 
     if (dot(ray.direction, output.normal) > 0.0) {
       output.normal = -output.normal;
@@ -220,7 +263,7 @@ fn getTriangleAlbedo(
     intersection: hitResult,
 ) -> vec4<f32> {
     if(!intersection.hit){
-        return vec4<f32>(1);
+        return vec4<f32>(0);
     }
 
     /*let textureCoord = material.diffuse_atlas_start + intersection.uv * material.diffuse_atlas_extend;
@@ -231,7 +274,10 @@ fn getTriangleAlbedo(
         textureColor = vec4<f32>(1);
     }*/
 
+    //let triangleColor = vec4<f32>(intersection.position, 1);
+    //let triangleColor = vec4<f32>(intersection.normal, 1);
     let triangleColor = vec4<f32>(material.color, 1);
+    //let triangleColor = vec4<f32>(0);
 
     return triangleColor;
     //return triangleColor * textureColor;
@@ -271,9 +317,9 @@ fn calculateDirectLighting(
 ) -> directLightingData {
   var output: directLightingData;
 
-  let lightChosen = floor(random(seed) * (lightNumber + enviromentalLight)); // +1 for enviromental lighting in the future
+  let lightChosen = floor(random(seed) * (inputLights.objectNumber + inputLights.sampleSky)); // +1 for enviromental lighting in the future
   
-  if(lightChosen == lightNumber){ // sky light
+  if(lightChosen == inputLights.objectNumber){ // sky light
     let radius = 1000.0;
     let randomLightPoint = origin + radius * randomPoint(seed, origin);
 
@@ -306,10 +352,22 @@ fn calculateDirectLighting(
     return output;
   }
   
-  let lightIndex = i32(lights[i32(lightChosen)]);
-  let light = objects[lightIndex];
+  let lightIndex = i32(inputLights.objects[i32(lightChosen)]);
+  let light = inputMap.objects[lightIndex];
 
-  let randomLightPoint = light.position + (light.radius + 0.01) * randomPoint(seed, origin);
+  // get random point on light
+
+  let r1 = random(seed);
+  let r2 = random(seed);
+
+  let sqrt_r1: f32 = sqrt(r1);
+  let u = 1.0 - sqrt_r1;
+  let v = r2 * sqrt_r1;
+  let w = 1.0 - u - v;
+
+  let randomLightPoint = u * light.a + v * light.b + w * light.c;
+
+  // calculate hit
 
   let direction = normalize(randomLightPoint - origin);
   let ray = ray(origin + 0.01 * direction, direction);
@@ -318,7 +376,7 @@ fn calculateDirectLighting(
   if(hit.hit && hit.objectHit == i32(lightIndex)){
     let distance = distance(origin, hit.position);
 
-    output.lightArea = /*4 **/ PI * (light.radius * light.radius);
+    output.lightArea = 0.5 * length(cross(light.b - light.a, light.c - light.a));
     output.intersection = hit;
     output.direction = direction;
     output.diminuation = distance * distance;
@@ -329,7 +387,7 @@ fn calculateDirectLighting(
   return output;
 }
 
-const bounces = 3;
+const bounces = 2;
 const spp = 1;
 
 struct rayColor {
@@ -363,13 +421,76 @@ struct rayColor {
 
     let diffuseDirection = normalize(hit.normal + RandomSphereDirection(seed, hit.position));
     let G = abs(dot(hit.normal, lightData.direction) * dot(lightData.intersection.normal, lightData.direction)) / lightData.diminuation;
-    let b = Eval_BRDF(diffuseDirection, lightData.direction);
+    let b = Eval_BRDF(diffuseDirection, lightData.direction, 0.0);
 
-    output.color = ((lightNumber + 1) * lightData.lightArea * b * G * Le(lightMaterial, lightData.intersection).rgb) * material.color;
+    output.color = ((inputLights.objectNumber + 1) * lightData.lightArea * b * G * Le(lightMaterial, lightData.intersection).rgb) * material.color;
     return output;
   }
 
   output.color = hit.material.emission;
+  return output;
+}*/
+
+/*fn calculateRayColor(
+  seed: ptr<function,f32>,
+  directRay: ray
+) -> rayColor {
+  var output: rayColor;
+
+  let firstHit = getHit(directRay);
+  if(!firstHit.hit){
+    output.normal = directRay.direction;
+    output.color = getSkyColor(directRay.direction);
+    output.intersection = directRay.direction * 1000 + directRay.origin;
+    return output;
+  }
+
+  let firstMaterial = firstHit.material;
+
+  let diffuseDirection = normalize(firstHit.normal + RandomSphereDirection(seed, firstHit.position));
+  let specularDirection = reflect(directRay.direction, firstHit.normal);
+  let isSpecular = f32(firstMaterial.specularity > randomFromVec3(seed, firstHit.position));
+  //let isTransparent = f32(firstMaterial.specularity > randomFromVec3(seed, firstHit.position));
+
+  let rayDirection = mix(diffuseDirection, specularDirection, firstMaterial.smoothness * isSpecular);
+
+  var nextRay: ray;
+  nextRay.direction = rayDirection;
+  nextRay.origin = firstHit.position + nextRay.direction * 0.0001;
+
+  var lastDirection = rayDirection;
+  var lastSpecularity = isSpecular;
+
+  var incomingLight = Le(firstMaterial, firstHit).rgb;
+  var throughput = getTriangleAlbedo(firstMaterial, firstHit).rgb;
+
+  output.normal = firstHit.normal;
+  output.intersection = firstHit.position;
+
+  let lightChosen = floor(random(seed) * (inputLights.objectNumber + inputLights.sampleSky)); // +1 for enviromental lighting in the future
+  let lightIndex = i32(inputLights.objects[i32(lightChosen)]);
+  let light = inputMap.objects[lightIndex];
+
+  let r1 = random(seed);
+  let r2 = random(seed);
+
+  let sqrt_r1: f32 = sqrt(r1);
+  let u = 1.0 - sqrt_r1;
+  let v = r2 * sqrt_r1;
+  let w = 1.0 - u - v;
+
+  let randomLightPoint = u * light.a + v * light.b + w * light.c;
+
+  let direction = normalize(randomLightPoint - nextRay.origin);
+  let ray = ray(nextRay.origin + 0.01 * nextRay.direction, nextRay.direction);
+  let hit = getHit(ray);
+
+  //if(hit.hit && hit.objectHit == i32(lightIndex)){
+  //  let distance = distance(nextRay.origin, hit.position);
+  //}
+
+  output.color = direction;
+
   return output;
 }*/
 
@@ -403,8 +524,8 @@ fn calculateRayColor(
   var lastDirection = rayDirection;
   var lastSpecularity = isSpecular;
 
-  var incomingLight = firstMaterial.emission;
-  var throughput = firstMaterial.color;
+  var incomingLight = Le(firstMaterial, firstHit).rgb;
+  var throughput = getTriangleAlbedo(firstMaterial, firstHit).rgb;
 
   output.normal = firstHit.normal;
   output.intersection = firstHit.position;
@@ -430,7 +551,7 @@ fn calculateRayColor(
       let G = abs(dot(hit.normal, lightData.direction) * dot(lightData.intersection.normal, lightData.direction)) / lightData.diminuation;
       let b = Eval_BRDF(nextRay.direction, lightData.direction, lastSpecularity);
 
-      incomingLight += (lightNumber * lightData.lightArea * b * G * Le(lightMaterial, lightData.intersection).rgb) * throughput;
+      incomingLight += (inputLights.objectNumber * lightData.lightArea * b * G * Le(lightMaterial, lightData.intersection).rgb) * throughput;
     }
 
     let material = hit.material;
@@ -512,6 +633,7 @@ fn main(
     pixelPosition /= f32(max(raysDone, 1));
 
     //textureStore(illuminationTexture, texID.xy, vec4<f32>(texCoord.xy / inputData.resolution, 0, 1));
+    //textureStore(illuminationTexture, texID.xy, vec4<f32>(f32(inputLights.sampleSky == 1.0), 0, 0, 1));
     textureStore(illuminationTexture, texID.xy, vec4<f32>(pixelColor, 1));
     textureStore(normalTexture, texID.xy, vec4<f32>(pixelNormal, 1));
     textureStore(positionTexture, texID.xy, vec4<f32>(pixelPosition, 1));

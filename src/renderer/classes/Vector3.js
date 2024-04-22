@@ -9,6 +9,10 @@ class Vector3 {
         return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
     }
 
+    lengthSquared() {
+        return this.x * this.x + this.y * this.y + this.z * this.z;
+    }
+
     normalize() {
         const mag = this.magnitude();
         if (mag !== 0) {

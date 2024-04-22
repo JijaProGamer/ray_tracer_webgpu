@@ -2,6 +2,18 @@ const Camera = require("./Camera.js")
 
 const processorList = require("./post_processing/processorList.js")
 
+const floatsPerTriangle = 4 * 3 + 4 * 3 + 2 * 2
+const floatsPerMaterial = 4 + 4 + 4
+
+function closestPowerOfTwo(num) {
+    let power = 1;
+    while (power < num) {
+        power *= 2;
+    }
+
+    return power;
+}
+
 class Renderer {
     Camera = new Camera()
 
@@ -9,10 +21,15 @@ class Renderer {
     FramesStatic = 0
 
     //Denoiser = {type: "none"}
-    Denoiser = { type: "ATrous", levels: [3, 5, 7], c_phi: 0.1, n_phi: 0.025, p_phi: 0.95 }
+    Denoiser = { type: "ATrous", levels: [3, 5, 7/*, 9, 11*/], c_phi: 0.75, n_phi: 0.005, p_phi: 0.25 }
     PostProcessingStack = [
-        new processorList.BloomProcessor()
+        //new processorList.BloomProcessor()
     ]
+
+    Map = []
+    Lights = []
+    Materials = {}
+    SampleSky = false
 
     constructor({ Canvas }) {
         this.Canvas = Canvas;
@@ -54,12 +71,19 @@ class Renderer {
         // init buffers & layouts
 
         await this.MakeLayouts();
-        this.MakeBuffers();
+        this.#MakeStaticBuffers()
+        this.MakeBuffers(false);
+        this.#MakeStaticBindGroups()
+
+        this.SetMap([], {})
+        this.MakeBindGroups()
+
 
         // post processing stack
 
         for(let PostProcessingStackElement of this.PostProcessingStack ){
             await PostProcessingStackElement.Init(this)
+            await PostProcessingStackElement.MakeBuffers()
         }
     }
 
@@ -135,6 +159,39 @@ class Renderer {
                         type: "read-only-storage",
                     },
                 }
+            ],
+        });
+
+        this.tracerMapDataBindGroupLayout = this.Device.createBindGroupLayout({
+            entries: [
+                {
+                    binding: 0,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: {
+                        type: "read-only-storage",
+                    },
+                },
+                {
+                    binding: 1,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: {
+                        type: "read-only-storage",
+                    },
+                },
+                {
+                    binding: 2,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: {
+                        type: "read-only-storage",
+                    },
+                },
+                {
+                    binding: 3,
+                    visibility: GPUShaderStage.COMPUTE,
+                    texture: {
+                        format: "rgba32float",
+                    },
+                },
             ],
         });
 
@@ -245,7 +302,7 @@ class Renderer {
                 entryPoint: "main"
             },
             layout: this.Device.createPipelineLayout({
-                bindGroupLayouts: [this.tracerDataBindGroupLayout, this.tracerTexturesLayout]
+                bindGroupLayouts: [this.tracerDataBindGroupLayout, this.tracerMapDataBindGroupLayout, this.tracerTexturesLayout]
             }),
         }
 
@@ -264,7 +321,7 @@ class Renderer {
         this.denoiserPipeline = this.Device.createComputePipeline(denoiserPipelineDescriptor);
     }
 
-    MakeBuffers() {
+    #MakeStaticBuffers(){
         this.GlobalDataBuffer = this.Device.createBuffer({
             size: 16,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -279,9 +336,9 @@ class Renderer {
             size: 16,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
+    }
 
-
-
+    MakeBuffers(updatePostProcessStack) {
         this.denoisedTexture = this.Device.createTexture({
             size: [this.Canvas.width, this.Canvas.height],
             format: 'rgba32float',
@@ -351,6 +408,15 @@ class Renderer {
         });*/
 
 
+
+        if(updatePostProcessStack){
+            for(let PostProcessingStackElement of this.PostProcessingStack ){
+                PostProcessingStackElement.MakeBuffers()
+            }
+        }
+    }
+
+    #MakeStaticBindGroups(){
         this.rendererDataBindGroup = this.Device.createBindGroup({
             layout: this.rendererDataBindGroupLayout,
             entries: [
@@ -360,21 +426,6 @@ class Renderer {
                         buffer: this.GlobalDataBuffer,
                     },
                 },
-            ],
-        });
-
-        this.historyBindGroup = this.Device.createBindGroup({
-            layout: this.historyImageLayout,
-            entries: [
-                { binding: 0, resource: this.historyImage.createView() },
-                { binding: 1, resource: this.historyImageRead.createView() },
-            ],
-        });
-
-        this.rendererTraceBindGrup = this.Device.createBindGroup({
-            layout: this.rendererTraceImageLayout,
-            entries: [
-                { binding: 0, resource: this.denoisedTexture.createView() },
             ],
         });
 
@@ -396,15 +447,6 @@ class Renderer {
             ],
         });
 
-        this.tracerTexturesBindGroup = this.Device.createBindGroup({
-            layout: this.tracerTexturesLayout,
-            entries: [
-                { binding: 0, resource: this.illuminationTexture.createView() },
-                { binding: 1, resource: this.normalTexture.createView() },
-                { binding: 2, resource: this.positionTexture.createView() },
-            ],
-        });
-
         this.denoiserDataBindGroup = this.Device.createBindGroup({
             layout: this.denoiserDataBindGroupLayout,
             entries: [
@@ -422,6 +464,17 @@ class Renderer {
                 },
             ],
         });
+    }
+
+    MakeBindGroups(){
+        this.tracerTexturesBindGroup = this.Device.createBindGroup({
+            layout: this.tracerTexturesLayout,
+            entries: [
+                { binding: 0, resource: this.illuminationTexture.createView() },
+                { binding: 1, resource: this.normalTexture.createView() },
+                { binding: 2, resource: this.positionTexture.createView() },
+            ],
+        });
 
         this.denoiserTexturesBindGroup = this.Device.createBindGroup({
             layout: this.denoiserTexturesLayout,
@@ -433,9 +486,50 @@ class Renderer {
             ],
         });
 
-        for(let PostProcessingStackElement of this.PostProcessingStack ){
-            PostProcessingStackElement.MakeBuffers()
-        }
+        this.historyBindGroup = this.Device.createBindGroup({
+            layout: this.historyImageLayout,
+            entries: [
+                { binding: 0, resource: this.historyImage.createView() },
+                { binding: 1, resource: this.historyImageRead.createView() },
+            ],
+        });
+
+        this.rendererTraceBindGrup = this.Device.createBindGroup({
+            layout: this.rendererTraceImageLayout,
+            entries: [
+                { binding: 0, resource: this.denoisedTexture.createView() },
+            ],
+        });
+    }
+
+    #MakeMapBindGroups(){
+        this.tracerMapDataBindGroup = this.Device.createBindGroup({
+            layout: this.tracerMapDataBindGroupLayout,
+            entries: [
+                {
+                    binding: 0,
+                    resource: {
+                        buffer: this.mapBuffer,
+                    },
+                },
+                {
+                    binding: 1,
+                    resource: {
+                        buffer: this.lightBuffer,
+                    },
+                },
+                {
+                    binding: 2,
+                    resource: {
+                        buffer: this.materialBuffer,
+                    },
+                },
+                { 
+                    binding: 3, 
+                    resource: this.materialTextureMap.createView() 
+                },
+            ],
+        });
     }
 
     #UpdateGlobalData() {
@@ -460,7 +554,7 @@ class Renderer {
         this.Camera.CameraMoved = false
     }
 
-    async DenoiseFrame() {
+    async #DenoiseFrame() {
         switch (this.Denoiser.type) {
             case "none":
                 var copyCommandEncoder = this.Device.createCommandEncoder();
@@ -582,13 +676,159 @@ class Renderer {
         }
     }
 
+    async #UpdateTextures(){
+        if(!this.materialTextureMap){
+            this.materialTextureMap = this.Device.createTexture({
+                size: [this.Device.limits.maxTextureDimension2D, this.Device.limits.maxTextureDimension2D],
+                format: 'rgba8unorm',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
+            });
+        }
+        //this.MakeBindGroups()
+    }
+
+    async #UpdateMaterials(Materials){
+        let madeMapBindGroups = this.#UpdateTextures()
+
+        const MaterialKeys = Object.entries(Materials)
+        if(MaterialKeys.length != Object.keys(this.Materials).length || Object.keys(this.Materials).length == 0){
+            this.materialBuffer = this.Device.createBuffer({
+                size: (4 + (closestPowerOfTwo(Object.keys(Materials).length) * floatsPerMaterial)) * 4,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            });
+
+            if(!madeMapBindGroups){
+                this.#MakeMapBindGroups()
+            }
+        }
+    
+        const materialData = new Float32Array(4 + Object.keys(Materials).length * floatsPerMaterial);
+
+        materialData[0] = MaterialKeys.length;
+
+        let materialIndex = 0;
+        for(let [MaterialName, Material] of MaterialKeys){
+            let MaterialMemoryIndex = 4 + materialIndex * floatsPerMaterial;
+
+            materialData[MaterialMemoryIndex + 0] = Material.Color.x;
+            materialData[MaterialMemoryIndex + 1] = Material.Color.y;
+            materialData[MaterialMemoryIndex + 2] = Material.Color.z;
+            materialData[MaterialMemoryIndex + 3] = Material.Smoothness;
+            
+            materialData[MaterialMemoryIndex + 4] = Material.Emission.x;
+            materialData[MaterialMemoryIndex + 5] = Material.Emission.y;
+            materialData[MaterialMemoryIndex + 6] = Material.Emission.z;
+            materialData[MaterialMemoryIndex + 7] = Material.Specularity;
+
+            materialData[MaterialMemoryIndex + 8] = Material.Transparency;
+            
+            materialIndex += 1;
+        }
+
+        this.Device.queue.writeBuffer(this.materialBuffer, 0, materialData, 0, materialData.length);
+        this.Materials = Materials;
+
+        return madeMapBindGroups;
+    }
+
+    async #UpdateLights(Map, Materials){
+        let EmmisiveMaterials = Object.keys(Materials)
+                    .filter((Material) => Materials[Material].Emission.lengthSquared() > 0)
+
+        let Lights = Map.filter((Sphere) => EmmisiveMaterials.includes(Sphere.Material))
+
+        if(Lights.length !== this.Lights.length || this.Lights.length == 0){
+            this.lightBuffer = this.Device.createBuffer({
+                size: (4 + closestPowerOfTwo(Lights.length)) * 4,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            });
+        }
+
+        const lightData = new Float32Array(4 + Lights.length);
+
+        lightData[0] = Lights.length;
+        lightData[1] = this.SampleSky;
+
+        for(let LightIndex = 0; LightIndex < Lights.length; LightIndex++){
+            lightData[LightIndex + 4] = Map.indexOf(Lights[LightIndex]);
+        }
+
+        this.Device.queue.writeBuffer(this.lightBuffer, 0, lightData, 0, lightData.length);
+        this.Lights = Lights
+    }
+
+    async SetMap(Map, Materials){
+        let madeMapBindGroups = this.#UpdateMaterials(Materials)
+        this.Camera.CameraMoved = true
+
+        this.#UpdateLights(Map, Materials)
+
+        if(Map.length !== this.Map.length || this.Map.length == 0){
+            this.mapBuffer = this.Device.createBuffer({
+                size: (4 + (closestPowerOfTwo(Map.length) * floatsPerTriangle)) * 4,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            });
+
+            if(!madeMapBindGroups){
+                madeMapBindGroups = true;
+                this.#MakeMapBindGroups()
+            }
+        }
+
+        const MaterialKeys = Object.keys(Materials)
+        const mapData = new Float32Array(4 + Map.length * floatsPerTriangle);
+
+        mapData[0] = Map.length;
+
+        for(let [TriangleIndex, Triangle] of Map.entries()){
+            let TriangleMemoryIndex = 4 + TriangleIndex * floatsPerTriangle;
+
+            mapData[TriangleMemoryIndex + 0] = Triangle.a.x;
+            mapData[TriangleMemoryIndex + 1] = Triangle.a.y;
+            mapData[TriangleMemoryIndex + 2] = Triangle.a.z;
+            mapData[TriangleMemoryIndex + 3] = MaterialKeys.findIndex((value) => value == Triangle.Material);
+        
+            mapData[TriangleMemoryIndex + 4] = Triangle.b.x;
+            mapData[TriangleMemoryIndex + 5] = Triangle.b.y;
+            mapData[TriangleMemoryIndex + 6] = Triangle.b.z;
+
+            mapData[TriangleMemoryIndex + 8] = Triangle.c.x;
+            mapData[TriangleMemoryIndex + 9] = Triangle.c.y;
+            mapData[TriangleMemoryIndex + 10] = Triangle.c.z;
+
+            mapData[TriangleMemoryIndex + 12] = Triangle.na.x;
+            mapData[TriangleMemoryIndex + 13] = Triangle.na.y;
+            mapData[TriangleMemoryIndex + 14] = Triangle.na.z;
+        
+            mapData[TriangleMemoryIndex + 16] = Triangle.nb.x;
+            mapData[TriangleMemoryIndex + 17] = Triangle.nb.y;
+            mapData[TriangleMemoryIndex + 18] = Triangle.nb.z;
+
+            mapData[TriangleMemoryIndex + 20] = Triangle.nc.x;
+            mapData[TriangleMemoryIndex + 21] = Triangle.nc.y;
+            mapData[TriangleMemoryIndex + 22] = Triangle.nc.z;
+
+            mapData[TriangleMemoryIndex + 24] = Triangle.uva.x;
+            mapData[TriangleMemoryIndex + 25] = Triangle.uva.y;
+            mapData[TriangleMemoryIndex + 26] = Triangle.uvb.y;
+            mapData[TriangleMemoryIndex + 27] = Triangle.uvb.z;
+        }
+
+        this.Device.queue.writeBuffer(this.mapBuffer, 0, mapData, 0, mapData.length);
+        this.Map = Map
+
+        if(madeMapBindGroups){
+            this.#MakeMapBindGroups()
+        }
+    }
+
     async MakeFrame() {
         if (this.Camera.CameraMoved) {
             this.#UpdateCameraData()
         }
 
         this.#UpdateGlobalData()
-        await this.DenoiseFrame()
+        await this.#DenoiseFrame()
 
         for(let PostProcessingStackElement of this.PostProcessingStack){
             await PostProcessingStackElement.ProcessFrame();
@@ -601,7 +841,8 @@ class Renderer {
         passEncoder.setPipeline(this.tracerPipeline);
 
         passEncoder.setBindGroup(0, this.tracerDataBindGroup);
-        passEncoder.setBindGroup(1, this.tracerTexturesBindGroup);
+        passEncoder.setBindGroup(1, this.tracerMapDataBindGroup);
+        passEncoder.setBindGroup(2, this.tracerTexturesBindGroup);
 
         passEncoder.dispatchWorkgroups(this.Canvas.width / 8, this.Canvas.height / 8);
         passEncoder.end();

@@ -14,6 +14,10 @@ app.get("/renderer/shaders/:shader", (req, res) => {
   res.sendFile(path.join(__dirname, "src/renderer/shaders/", req.params.shader))
 })
 
+app.get("/renderer/post_processing/:post_process/:shader", (req, res) => {
+  res.sendFile(path.join(__dirname, "src/renderer/post_processing/", req.params.post_process, req.params.shader))
+})
+
 app.listen(PORT, () => {
   console.log(`Server is up and running on port ${PORT}`);
 });

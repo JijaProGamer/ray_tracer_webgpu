@@ -1,8 +1,9 @@
 //enable chromium_experimental_read_write_storage_texture;
-const PI = 3.1415926535897932384626433832795028841971693993751058209749445923078164062;
 
 struct InputGlobalData {
-  resolution: vec2<f32>,
+    resolution: vec2<f32>,
+    totalFrames: f32,
+    framesStatic: f32,
 }
 
 @group(0) @binding(0) var<storage, read> inputData: InputGlobalData;
@@ -19,12 +20,14 @@ fn main(
     let uv = vec2<f32>(texID.xy);
         
     var totalColor: vec4<f32>;
-    for (var i = -1.0; i < 1.0; i = i + 1.0) {
-        for (var j = -1.0; j < 1.0; j = j + 1.0) {
+    for (var i = -2.0; i < 2.0; i = i + 2.0) {
+        for (var j = -2.0; j < 2.0; j = j + 2.0) {
             let sampleUV = uv + vec2<f32>(i, j);
-            totalColor += textureLoad(fullTexture, sampleUV, 0);
+            totalColor += textureLoad(fullTexture, vec2<u32>(sampleUV), 0);
         }
     }
+    
+    totalColor /= 25.0;
         
-    textureStore(quarterTexture, texID.xy / 2, totalColor / 9.0);
+    textureStore(quarterTexture, texID.xy / 2, totalColor);
 }
