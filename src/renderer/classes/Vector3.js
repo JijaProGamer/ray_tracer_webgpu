@@ -59,6 +59,10 @@ class Vector3 {
         return this;
     }
 
+    negate(){
+        return this.multiplyScalar(-1);
+    }
+
     clone() {
         return new Vector3(this.x, this.y, this.z);
     }
@@ -68,6 +72,25 @@ class Vector3 {
         const dy = v1.y - v2.y;
         const dz = v1.z - v2.z;
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    rotateAxis(x, y, z) {
+        const cosX = Math.cos(x);
+        const sinX = Math.sin(x);
+        const cosY = Math.cos(y);
+        const sinY = Math.sin(y);
+        const cosZ = Math.cos(z);
+        const sinZ = Math.sin(z);
+
+        const newX = this.x * (cosY * cosZ) - this.y * (cosY * sinZ) + this.z * sinY;
+        const newY = this.x * (sinX * sinY * cosZ + cosX * sinZ) + this.y * (-sinX * sinY * sinZ + cosX * cosZ) - this.z * (sinX * cosY);
+        const newZ = this.x * (-cosX * sinY * cosZ + sinX * sinZ) + this.y * (cosX * sinY * sinZ + sinX * cosZ) + this.z * (cosX * cosY);
+
+        this.x = newX;
+        this.y = newY;
+        this.z = newZ;
+
+        return this;
     }
 }
 

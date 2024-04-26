@@ -17,6 +17,7 @@ struct VertexOut {
 @group(1) @binding(1) var historyReadTexture: texture_2d<f32>;
 
 @group(2) @binding(0) var illuminationTexture: texture_2d<f32>;
+@group(2) @binding(1) var albedoTexture: texture_2d<f32>;
 
 /*fn hash(input: u32) -> u32 {
     let state = input * 747796405u + 2891336453u;
@@ -81,11 +82,12 @@ fn fragment_main(fragData: VertexOut) -> @location(0) vec4f
   texCoord /= 2;
   
   var lastColor = textureLoad(historyReadTexture, vec2<i32>(texCoord), 0);
+
   var newColor = textureLoad(illuminationTexture, vec2<i32>(texCoord), 0);
-  //var newColor = textureLoad(illuminationTexture, vec2i(0, 0), 0);
+  var albedoColor = textureLoad(albedoTexture, vec2<i32>(texCoord), 0);
 
   let blendWeight = 1.0 / (inputData.framesStatic + 1);
-  let averageColor = mix(lastColor, newColor, blendWeight);
+  let averageColor = mix(lastColor, newColor * albedoColor, blendWeight);
 
   textureStore(historyTexture, vec2<i32>(texCoord), averageColor);
 

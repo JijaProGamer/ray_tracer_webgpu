@@ -44,10 +44,12 @@ struct InputMaterialsData {
 @group(1) @binding(1) var<storage, read> inputLights: InputLightData;
 @group(1) @binding(2) var<storage, read> inputMaterials: InputMaterialsData;
 @group(1) @binding(3) var inputMaterialTexture: texture_2d_array<f32>;
+@group(1) @binding(4) var inputMaterialSampler: sampler;
 
 @group(2) @binding(0) var illuminationTexture: texture_storage_2d<rgba32float, write>;
-@group(2) @binding(1) var normalTexture: texture_storage_2d<rgba8snorm, write>;
-@group(2) @binding(2) var positionTexture: texture_storage_2d<rgba16float, write>;
+@group(2) @binding(1) var albedoTexture: texture_storage_2d<rgba8unorm, write>;
+@group(2) @binding(2) var normalTexture: texture_storage_2d<rgba8snorm, write>;
+@group(2) @binding(3) var positionTexture: texture_storage_2d<rgba16float, write>;
 
 fn hash(input: u32) -> u32 {
     let state = input * 747796405u + 2891336453u;
@@ -127,7 +129,7 @@ struct RayTriangleIntersectionResult {
 
 fn ray_intersects_triangle(triangle: triangle, ray: ray) -> RayTriangleIntersectionResult 
 {
-    let epsilon: f32 = 0.0001;
+    let epsilon: f32 = 0.00001;
 
     let edge1: vec3<f32> = triangle.b - triangle.a;
     let edge2: vec3<f32> = triangle.c - triangle.a;
@@ -171,6 +173,12 @@ struct material {
   specularity: f32,
 
   transparency: f32,
+  atlasLayer: f32,
+  padding0: f32,
+  padding1: f32,
+
+  atlasStart: vec2<f32>,
+  atlasExtend: vec2<f32>
 }
 
 struct hitResult {
@@ -197,6 +205,7 @@ struct triangle {
 
   uva: vec2<f32>,
   uvb: vec2<f32>,
+  uvc: vec2<f32>,
 }
 
 fn getHit(ray: ray) -> hitResult {
@@ -226,7 +235,7 @@ fn getHit(ray: ray) -> hitResult {
     
     output.hit = true;
     output.position = ray.origin + ray.direction * bestDist;
-    output.uv = bestData.u * bestObj.uva + bestData.v * bestObj.uvb;
+    output.uv = w * bestObj.uva + bestData.u * bestObj.uvb + bestData.v * bestObj.uvc;
     output.normal = normalize(bestData.u * bestObj.na + bestData.v * bestObj.nb + w * bestObj.nc);
     output.material = inputMaterials.objects[i32(bestObj.material)];
 
@@ -266,21 +275,15 @@ fn getTriangleAlbedo(
         return vec4<f32>(0);
     }
 
-    /*let textureCoord = material.diffuse_atlas_start + intersection.uv * material.diffuse_atlas_extend;
+    let textureCoord = material.atlasStart + intersection.uv * material.atlasExtend;
+    var textureColor = textureSampleLevel(inputMaterialTexture, inputMaterialSampler, textureCoord, i32(material.atlasLayer), 0);
 
-    var textureColor = textureSampleLevel(textureAtlas, textureAtlasSampler, textureCoord, i32(material.texture_layer), 0);
-
-    if(material.texture_layer == -1.0){
+    if(material.atlasLayer == -1.0){
         textureColor = vec4<f32>(1);
-    }*/
+    }
 
-    //let triangleColor = vec4<f32>(intersection.position, 1);
-    //let triangleColor = vec4<f32>(intersection.normal, 1);
     let triangleColor = vec4<f32>(material.color, 1);
-    //let triangleColor = vec4<f32>(0);
-
-    return triangleColor;
-    //return triangleColor * textureColor;
+    return triangleColor * textureColor;
 }
 
 fn Le(
@@ -370,7 +373,7 @@ fn calculateDirectLighting(
   // calculate hit
 
   let direction = normalize(randomLightPoint - origin);
-  let ray = ray(origin + 0.01 * direction, direction);
+  let ray = ray(origin /*+ 0.01 * direction*/, direction);
   let hit = getHit(ray);
 
   if(hit.hit && hit.objectHit == i32(lightIndex)){
@@ -387,11 +390,12 @@ fn calculateDirectLighting(
   return output;
 }
 
-const bounces = 2;
+const bounces = 3;
 const spp = 1;
 
 struct rayColor {
   color: vec3<f32>,
+  albedo: vec3<f32>,
   intersection: vec3<f32>,
   normal: vec3<f32>
 }
@@ -503,8 +507,9 @@ fn calculateRayColor(
   let firstHit = getHit(directRay);
   if(!firstHit.hit){
     output.normal = directRay.direction;
-    output.color = getSkyColor(directRay.direction);
-    output.intersection = directRay.direction * 1000 + directRay.origin;
+    output.color = vec3<f32>(1);
+    output.albedo = getSkyColor(directRay.direction);
+    output.intersection = directRay.direction * 10000 + directRay.origin;
     return output;
   }
 
@@ -519,14 +524,15 @@ fn calculateRayColor(
 
   var nextRay: ray;
   nextRay.direction = rayDirection;
-  nextRay.origin = firstHit.position + nextRay.direction * 0.0001;
+  nextRay.origin = firstHit.position;// + nextRay.direction * 0.0001;
 
   var lastDirection = rayDirection;
   var lastSpecularity = isSpecular;
 
   var incomingLight = Le(firstMaterial, firstHit).rgb;
-  var throughput = getTriangleAlbedo(firstMaterial, firstHit).rgb;
+  var throughput = vec3<f32>(1);
 
+  output.albedo = getTriangleAlbedo(firstMaterial, firstHit).rgb;
   output.normal = firstHit.normal;
   output.intersection = firstHit.position;
 
@@ -564,7 +570,7 @@ fn calculateRayColor(
     let rayDirection = mix(diffuseDirection, specularDirection, material.smoothness * isSpecular);
 
     nextRay.direction = rayDirection;
-    nextRay.origin = hit.position + nextRay.direction * 0.00001;
+    nextRay.origin = hit.position;// + nextRay.direction * 0.00001;
 
     let cosTheta = abs(dot(hit.normal, nextRay.direction));
     let sinTheta = sqrt(1 - pow(cosTheta, 2));
@@ -597,6 +603,7 @@ fn main(
     let depth = tan(cameraData.fov / 2.0);
     
     var pixelColor: vec3<f32>;
+    var pixelAlbedo: vec3<f32>;
     var pixelNormal: vec3<f32>;
     var pixelPosition: vec3<f32>;
 
@@ -622,6 +629,7 @@ fn main(
             continue;
         }
 
+        pixelAlbedo += rayColor.albedo;
         pixelColor += rayColor.color;
         pixelNormal += rayColor.normal;
         pixelPosition += (cameraData.position - rayColor.intersection);
@@ -629,18 +637,12 @@ fn main(
     }
 
     pixelColor /= f32(max(raysDone, 1));
+    pixelAlbedo /= f32(max(raysDone, 1));
     pixelNormal /= f32(max(raysDone, 1));
     pixelPosition /= f32(max(raysDone, 1));
 
-    //textureStore(illuminationTexture, texID.xy, vec4<f32>(texCoord.xy / inputData.resolution, 0, 1));
-    //textureStore(illuminationTexture, texID.xy, vec4<f32>(f32(inputLights.sampleSky == 1.0), 0, 0, 1));
     textureStore(illuminationTexture, texID.xy, vec4<f32>(pixelColor, 1));
+    textureStore(albedoTexture, texID.xy, vec4<f32>(pixelAlbedo, 1));
     textureStore(normalTexture, texID.xy, vec4<f32>(pixelNormal, 1));
     textureStore(positionTexture, texID.xy, vec4<f32>(pixelPosition, 1));
-
-    //return vec4<f32>(random(&seed), random(&seed), random(&seed), 1);
-    //return averageColor;
-    //return vec4<f32>(pow(averageColor.xyz, vec3<f32>(1/2.2)), 1);
-    //return vec4<f32>(pow(ACESFilm(averageColor.xyz), vec3<f32>(1/2.2)), 1);
-    //return vec4<f32>(texCoord / inputData.resolution, 0, 1);
 }

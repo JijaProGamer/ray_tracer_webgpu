@@ -2,11 +2,13 @@ const moveJoystick = new JoyStick('moveJoystick');
 const rotateJoystick = new JoyStick('rotateJoystick');
 
 const renderer = require("./renderer/Renderer.js")
-const Vector3 = require("./renderer/classes/Vector3.js")
 
 const Triangle = require("./renderer/classes/Triangle.js")
 const Material = require("./renderer/classes/Material.js");
 const Vector2 = require("./renderer/classes/Vector2.js");
+const Vector3 = require("./renderer/classes/Vector3.js")
+const Matrix = require("./renderer/classes/Matrix.js")
+const Texture = require("./renderer/classes/Texture.js")
 
 const canvas = document.querySelector(`canvas[id="canvas"]`)
 const fpsCounter = document.querySelector("#fpsCount")
@@ -22,88 +24,11 @@ let isFullScreen = false;
 let map = []
 let materials = {}
 
-// walls
-
-/*let Khaki = new Material();
-Khaki.Color = new Vector3(0.76, 0.69, 0.56);
-materials["Khaki"] = Khaki
-
-let wallUp = new Sphere()
-wallUp.Position = new Vector3(0, 106, 0)
-wallUp.Radius = 100;
-wallUp.Material = "Khaki"
-map.push(wallUp)
-
-let wallDown = new Sphere()
-wallDown.Position = new Vector3(0, -106, 0)
-wallDown.Radius = 100;
-wallDown.Material = "Khaki"
-map.push(wallDown)
-
-let wallFront = new Sphere()
-wallFront.Position = new Vector3(0, 0, 110)
-wallFront.Radius = 100;
-wallFront.Material = "Khaki"
-map.push(wallFront)
-
-let wallBack = new Sphere()
-wallBack.Position = new Vector3(0, 0, -110)
-wallBack.Radius = 100;
-wallBack.Material = "Khaki"
-map.push(wallBack)
-
-let Red = new Material();
-Red.Color = new Vector3(0.5, 0.05, 0.05);
-materials["Red"] = Red
-
-let wallLeft = new Sphere()
-wallLeft.Position = new Vector3(-106, 0, 0)
-wallLeft.Radius = 100;
-wallLeft.Material = "Red"
-map.push(wallLeft)
-
-let Green = new Material();
-Green.Color = new Vector3(0.05, 0.5, 0.05);
-materials["Green"] = Green
-
-let wallRight = new Sphere()
-wallRight.Position = new Vector3(106, 0, 0)
-wallRight.Radius = 100;
-wallRight.Material = "Green"
-map.push(wallRight)
-
-// light
-
-let LightMaterial = new Material();
-LightMaterial.Color = new Vector3(1, 1, 1);
-LightMaterial.Emission = new Vector3(5, 5, 5);
-materials["Light"] = LightMaterial
-
-let light = new Sphere()
-light.Position = new Vector3(0, 2, -6)
-light.Radius = 1.5;
-light.Material = "Light"
-map.push(light)
-
-// object
-
-let object1 = new Sphere()
-object1.Position = new Vector3(-3, -3.5, 1.25)
-object1.Radius = 3;
-object1.Material = "Khaki"
-map.push(object1)
-
-let object2 = new Sphere()
-object2.Position = new Vector3(3, -3.5, -1.25)
-object2.Radius = 3;
-object2.Material = "Khaki"
-map.push(object2)*/
-
 function MakeQuad(Q, u, v, MaterialName){
   let a = Q;
   let b = Q.clone().add(u);
   let d = Q.clone().add(v);
-  let c = Q.clone().add(u).add(v);
+  let c = d.clone().add(u);
 
   let edge1 = b.clone().subtract(a);
   let edge2 = c.clone().subtract(a);
@@ -113,8 +38,8 @@ function MakeQuad(Q, u, v, MaterialName){
   tri1.a = a;
   tri1.b = b;
   tri1.c = c;
-  tri1.uva = new Vector2(0, 0);
-  tri1.uvb = new Vector2(0, 0);
+  tri1.uva = new Vector2(1, 1);
+  tri1.uvb = new Vector2(1, 0);
   tri1.uvc = new Vector2(0, 0);
   tri1.na = normal;
   tri1.nb = normal;
@@ -126,8 +51,8 @@ function MakeQuad(Q, u, v, MaterialName){
   tri2.a = d;
   tri2.b = a;
   tri2.c = c;
-  tri2.uva = new Vector2(0, 0);
-  tri2.uvb = new Vector2(0, 0);
+  tri2.uva = new Vector2(0, 1);
+  tri2.uvb = new Vector2(1, 1);
   tri2.uvc = new Vector2(0, 0);
   tri2.na = normal;
   tri2.nb = normal;
@@ -136,32 +61,75 @@ function MakeQuad(Q, u, v, MaterialName){
   map.push(tri2)
 }
 
-function MakeBox(Q, u, v, w, MaterialName){
-  //MakeQuad(Q, u, v, MaterialName);
-  MakeQuad(Q.clone().add(w), u, v, MaterialName);
+function MakeBox(Q, u, v, w, rotationX, rotationY, Faces, MaterialName){
+  u.rotateAxis(rotationX, 0, 0);
+  v.rotateAxis(0, rotationY, 0);
 
-  MakeQuad(Q, w, v, MaterialName);
-  MakeQuad(Q, w, u, MaterialName);
+  if(Faces.bottom) {MakeQuad(Q, u, v, MaterialName)}; 
+  if(Faces.top) {MakeQuad(Q.clone().add(w), u, v, MaterialName)};
 
-  MakeQuad(Q.clone().add(u), v, w, MaterialName);
-  MakeQuad(Q.clone().add(v), u, w, MaterialName);
+  if(Faces.right) {MakeQuad(Q, w, v, MaterialName)};
+  if(Faces.back) {MakeQuad(Q, w, u, MaterialName)};
+
+  if(Faces.left) {MakeQuad(Q.clone().add(u), v, w, MaterialName)};
+  if(Faces.front) {MakeQuad(Q.clone().add(v), u, w, MaterialName)};
 }
 
+let ExampleTexture = new Texture();
+
+/*ExampleTexture.Width = 50;
+ExampleTexture.Height = 5;
+ExampleTexture.Pixels = new Uint8Array(ExampleTexture.Width * ExampleTexture.Height * 4);
+
+for(let x = 0; x < ExampleTexture.Width; x++){
+  for(let y = 0; y < ExampleTexture.Height; y++){
+    let i = (x + ExampleTexture.Width * y) * 4;
+
+    let r = x / ExampleTexture.Width;
+    let g = y / ExampleTexture.Height;
+    let b = 0;
+
+    ExampleTexture.Pixels[i + 0] = Math.floor(r * 255);
+    ExampleTexture.Pixels[i + 1] = Math.floor(g * 255);
+    ExampleTexture.Pixels[i + 2] = Math.floor(b * 255);
+    ExampleTexture.Pixels[i + 3] = 255;
+  }
+}*/
+
+/*let ExampleTexture2 = new Texture();
+ExampleTexture2.Height = 10;
+ExampleTexture2.Width = 10;
+ExampleTexture2.Pixels = new Float32Array(ExampleTexture2.Width * ExampleTexture2.Height * 4);
+
+for(let x = 0; x < 10; x++){
+  for(let y = 0; y < 10; y++){
+    let i = (x + ExampleTexture2.Width * y)* 4;
+
+    ExampleTexture2.Pixels[i + 0] = x % 2 == 1;
+    ExampleTexture2.Pixels[i + 1] = 1;
+    ExampleTexture2.Pixels[i + 2] = 1;
+    ExampleTexture2.Pixels[i + 3] = 1;
+  }
+}*/
+
 let Khaki = new Material();
+//Khaki.Color = new Vector3(1, 0, 1);
 Khaki.Color = new Vector3(0.76, 0.69, 0.56);
+Khaki.Texture = ExampleTexture
 materials["Khaki"] = Khaki
 
 let Red = new Material();
-Red.Color = new Vector3(0.5, 0.1, 0.1);
+Red.Color = new Vector3(0.33, 0.0, 0.0);
+//Red.Texture = ExampleTexture2;
 materials["Red"] = Red
 
 let Green = new Material();
-Green.Color = new Vector3(0.1, 0.5, 0.1);
+Green.Color = new Vector3(0.0, 0.33, 0.0);
 materials["Green"] = Green
 
 let Light = new Material();
 Light.Color = new Vector3(1, 1, 1);
-Light.Emission = new Vector3(10, 10, 10);
+Light.Emission = new Vector3(15, 15, 15);
 materials["Light"] = Light
 
 MakeQuad(new Vector3(-0.5, -1, -3), new Vector3(0, 0, 4), new Vector3(2, 0, 0), "Khaki") // bottom
@@ -176,20 +144,30 @@ MakeQuad(new Vector3(-0.5, -1, 1), new Vector3(0, 2, 0), new Vector3(2, 0, 0), "
 MakeQuad(new Vector3(0.25, 0.99999, -2), new Vector3(0, 0, 0.5), new Vector3(0.5, 0, 0), "Light") // light
 
 MakeBox(
-  new Vector3(0.35, -1, -2.5), 
+  new Vector3(0.5, -1, -2.5), 
   new Vector3(0.75, 0, 0), 
   new Vector3(0, 0, 0.75), 
   new Vector3(0, 1.5, 0), 
+  0, -Math.PI / 6,
+  {
+    top: true,
+    bottom: false,
+    back: true,
+    front: true,
+    left: true,
+    right: true
+  },
   "Khaki"
 )
 
-MakeBox(
+/*MakeBox(
   new Vector3(-0.25, -1, -1.5), 
   new Vector3(0.75, 0, 0), 
   new Vector3(0, 0, 0.75), 
   new Vector3(0, 0.75, 0), 
+  0, -Math.PI / 16,
   "Khaki"
-)
+)*/
 
 function setCanvasSize(){
   let width 
@@ -232,6 +210,8 @@ let moved = false;
 async function init() {
   await Renderer.Init()
   setCanvasSize()
+
+  await ExampleTexture.loadFromURL(`https://th.bing.com/th/id/R.307133153095777928fafb58e3ffb64b?rik=i%2ftwCkTxjf9aqw&pid=ImgRaw&r=0`);
 
   /*let val = 0
   setInterval(() => {

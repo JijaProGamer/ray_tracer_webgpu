@@ -1,3 +1,5 @@
+const Vector3 = require("./Vector3")
+
 class Matrix {
     constructor(rows, cols, initial) {
         this.rows = rows;
@@ -46,6 +48,20 @@ class Matrix {
                 result.set(i, j, sum);
             }
         }
+
+        return result;
+    }
+
+    multiplyVector(vector) {
+        if (this.cols !== 3) {
+            throw new Error('Incompatible dimensions for matrix-vector multiplication');
+        }
+
+        const result = new Vector3(
+            this.get(0, 0) * vector.x + this.get(0, 1) * vector.y + this.get(0, 2) * vector.z,
+            this.get(1, 0) * vector.x + this.get(1, 1) * vector.y + this.get(1, 2) * vector.z,
+            this.get(2, 0) * vector.x + this.get(2, 1) * vector.y + this.get(2, 2) * vector.z
+        );
 
         return result;
     }

@@ -81,8 +81,8 @@ fn main(
             let position = vec2<f32>(f32(x), f32(y));
             //let kernel = sqrt(distance(position, vec2<f32>(0)));
 
-            //let weight = n_w * p_w * c_w;
-            let weight = n_w * p_w;
+            let weight = n_w * p_w * c_w;
+            //let weight = n_w * p_w;
             cum_w += weight;// * kernel;
             sum += weight * ctmp;// * kernel;
         }
